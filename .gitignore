@@ -2,3 +2,7 @@ __pycache__
 *.egg-info
 .DS_Store
 .venv
+.claude
+config/access_tokens.py
+dataset/
+output/

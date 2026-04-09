@@ -121,18 +121,26 @@ def rocket_forward(fattn: bool, topk: int, compression_ratio: float, prompt_budg
                     dim_head, num_heads, num_heads_kv
     ):
 
+        # batch_size， query长度（token长度），k矩阵长度
         batch_size = query.size(0)
         len_q = query.size(1)
         len_k = key_value.size(1)
 
+        # 一定使用 kv-cache ，预算不过短
         assert use_cache
         assert prompt_budget >= window_size
 
+        # 线性层，在这里是输入的 hidden state，计算得到 qkv 三个矩阵  
+        # 在 self-attention 调用过程中,query = key_value
+        # 分开设置是为了接口兼容 cress-attention
         h_q = project_q(query)             # (batch, len_q, num_heads * dim_head)
         h_k = project_k(key_value)         # (batch, len_k, num_heads * dim_head)
         h_v = project_v(key_value)         # (batch, len_k, num_heads * dim_head)
 
-
+        # 调整序列维度，调整为：(batch_size, nums_heads, len_q/len_k, dim_head)
+        # view 在不改变内存的情况下改变维度，如果内存不连续会报错
+        # permute 会交换维度，可能会改变内存连续性
+        # contiguous 将内存重整为连续
         h_q = h_q.view(batch_size, len_q, num_heads, dim_head).permute(0, 2, 1, 3).contiguous()   # (batch, num_heads, len_q, dim_head)
         h_k = h_k.view(batch_size, len_k, num_heads_kv, dim_head).permute(0, 2, 1, 3).contiguous()   # (batch, num_heads_kv, len_k, dim_head)
         h_v = h_v.view(batch_size, len_k, num_heads_kv, dim_head).permute(0, 2, 1, 3).contiguous()   # (batch, num_heads_kv, len_k, dim_head)
@@ -142,6 +150,7 @@ def rocket_forward(fattn: bool, topk: int, compression_ratio: float, prompt_budg
             h_q, h_k = position_bias(h_q, h_k, seq_len=len_k + kv_pos)
             h_k = torch.cat((past_key_value[0], h_k), dim=-2)
             h_v = torch.cat((past_key_value[1], h_v), dim=-2)
+            # 在一次前向传播的最后一层更新 kv_pos 的大小
             if self.layer_idx == self.config.num_hidden_layers-1:
                 kv_pos += len_k
             len_k = h_k.size(-2)
@@ -152,6 +161,10 @@ def rocket_forward(fattn: bool, topk: int, compression_ratio: float, prompt_budg
         if use_cache:
             current_key_value = h_k, h_v
 
+        # GQA，project_k/v 在计算过程中，让 若干注意力头 共同生成同一个 K V 矩阵，实现共用
+        # 这里通过 repeat_kv 复制展开，能够继续使用矩阵乘法计算
+        # num_heads // num_heads_kv == 共用头数
+        # 这是模型本身训练过程中就学习的模式，多个头学会共用 KV 矩阵
         h_k2 = repeat_kv(h_k, num_heads//num_heads_kv)
         h_v2 = repeat_kv(h_v, num_heads//num_heads_kv)
 
