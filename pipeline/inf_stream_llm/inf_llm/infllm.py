@@ -124,7 +124,7 @@ def initialize_model_tokenizer(pipeline_config):
             config=config,
             torch_dtype=dtype,
             low_cpu_mem_usage=True,
-            use_flash_attention_2=True,
+            use_flash_attention_2=pipeline_config.get('use_flash_attn', False),
             device_map="auto",
         )
 

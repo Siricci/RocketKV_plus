@@ -123,15 +123,17 @@ if [ $method == "baseline" ]; then
     --output_dir ${output_dir_root}/${task}/${method}/${model}/  
 else
   token_budget=$3
+  pyramid_slope=${4:-0}
   for dataset in narrativeqa qasper multifieldqa_en hotpotqa 2wikimqa musique gov_report qmsum multi_news trec triviaqa samsum passage_retrieval_en passage_count lcc repobench-p; do
     python pipeline/inf_stream_llm/main.py \
     --method ${method} \
     --token_budget ${token_budget} \
-    --exp_desc ${task}_${dataset}_${model}_${method}_${token_budget} \
+    --pyramid_slope ${pyramid_slope} \
+    --exp_desc ${task}_${dataset}_${model}_${method}_${token_budget}_slope${pyramid_slope} \
     --pipeline_config_dir config/pipeline_config/${task}/${model}.json \
     --eval_config_dir config/eval_config/${task}/${dataset}.json \
-    --output_folder_dir ${output_dir_root}/${task}/${method}/${token_budget}/${model}/${dataset}/
+    --output_folder_dir ${output_dir_root}/${task}/${method}/${token_budget}_slope${pyramid_slope}/${model}/${dataset}/
   done
   python visualization/longbench_results_summary/long_bench_tasks_summary.py \
-    --output_dir ${output_dir_root}/${task}/${method}/${token_budget}/${model}/
+    --output_dir ${output_dir_root}/${task}/${method}/${token_budget}_slope${pyramid_slope}/${model}/
 fi
