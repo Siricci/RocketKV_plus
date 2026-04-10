@@ -111,14 +111,47 @@ from .utils import repeat_kv
 
 kv_pos = 0
 
-def rocket_forward(fattn: bool, topk: int, compression_ratio: float, prompt_budget: int, window_size: int = 32, kernel_size: int = 63, skip_layers: int = 0, *args, **kwargs):
+def rocket_forward(fattn: bool, token_budget: int, method: str,
+                   max_seq_len_for_budget: int, total_max_new_tokens: int,
+                   window_size: int = 32, kernel_size: int = 63, skip_layers: int = 0,
+                   pyramid_slope: int = 0, num_hidden_layers: int = 32,
+                   **kwargs):  # 吸收 pipeline_params 中传入的无关键（model_name 等）
+    # 在 patch 时（模型加载阶段）预计算每一层的压缩参数，运行时按 layer_idx 直接索引
+    # 公式与原始 compress() 完全一致，只是以层级 token_budget 为基准逐层独立计算
+    mid = (num_hidden_layers - 1) / 2.0
+    layer_params = []
+    for i in range(num_hidden_layers):
+        # 第 i 层的 token 预算：浅层大，深层小；pyramid_slope=0 时各层相同
+        if pyramid_slope != 0:
+            layer_token_budget = max(window_size * 2,
+                                     round(token_budget + pyramid_slope * (mid - i)))
+        else:
+            layer_token_budget = token_budget
+        # 逐层计算 compression_ratio → r → 派生参数
+        cr = max(1.0, float(max_seq_len_for_budget) / layer_token_budget)
+        if method == 'rocket_r0.5':
+            r = 0.5
+        elif method == 'rocket_r0.7':
+            r = 0.7
+        elif method == 'rocket_r0.3':
+            r = 0.3
+        else:
+            r = min(0.2 + math.log2(cr) * 0.06, 0.8) if cr > 1.0 else 0.2
+        cap = int(float(max_seq_len_for_budget) / (cr ** r))
+        cap = max(cap, min(2 * total_max_new_tokens, max_seq_len_for_budget))
+        pb = max(window_size, cap - total_max_new_tokens)
+        topk_i = max(1, int(layer_token_budget // 2))
+        comp_ratio_i = max(1.0, float(cap) / layer_token_budget)
+        layer_params.append((pb, topk_i, comp_ratio_i))
+
     def forward(self, query : torch.Tensor,
                     key_value : torch.Tensor,
                     position_bias : Optional[torch.Tensor],
                     use_cache: bool,
                     past_key_value,
                     project_q, project_k, project_v, attention_out,
-                    dim_head, num_heads, num_heads_kv
+                    dim_head, num_heads, num_heads_kv,
+                    layer_idx
     ):
 
         # batch_size， query长度（token长度），k矩阵长度
@@ -126,9 +159,12 @@ def rocket_forward(fattn: bool, topk: int, compression_ratio: float, prompt_budg
         len_q = query.size(1)
         len_k = key_value.size(1)
 
-        # 一定使用 kv-cache ，预算不过短
+        # 一定使用 kv-cache
         assert use_cache
-        assert prompt_budget >= window_size
+
+        # 按 layer_idx 取本层独立参数（patch 时已预计算）
+        layer_budget, topk, compression_ratio = layer_params[layer_idx]
+        assert layer_budget >= window_size
 
         # 线性层，在这里是输入的 hidden state，计算得到 qkv 三个矩阵  
         # 在 self-attention 调用过程中,query = key_value
@@ -173,7 +209,7 @@ def rocket_forward(fattn: bool, topk: int, compression_ratio: float, prompt_budg
 
         if (prefill_phase and fattn) or self.layer_idx < skip_layers:
             #snapkv
-            if len_k > prompt_budget and self.layer_idx >= skip_layers:
+            if len_k > layer_budget and self.layer_idx >= skip_layers:
                 obs_window_size = min(window_size, h_q.size(2))
                 h_q_observe = h_q[:, :, -obs_window_size:]
                 dist = torch.arange(0, obs_window_size, device=h_q.device)[:, None] - torch.arange(0, len_k, device=h_q.device)[None, :] + len_k - obs_window_size
@@ -194,7 +230,7 @@ def rocket_forward(fattn: bool, topk: int, compression_ratio: float, prompt_budg
                 score = score[:,:,-obs_window_size:,:-obs_window_size].sum(dim=-2)
                 score = score.view(batch_size,num_heads_kv,-1,len_k-obs_window_size).sum(dim=2)
                 score = torch.nn.functional.max_pool1d(score, kernel_size=kernel_size, padding=kernel_size//2, stride=1)
-                indices = score.topk(prompt_budget-obs_window_size, dim=-1).indices.sort().values
+                indices = score.topk(layer_budget-obs_window_size, dim=-1).indices.sort().values
                 indices = indices.unsqueeze(-1).expand(-1,-1,-1,dim_head)
                 h_k_cur,h_v_cur = current_key_value
                 h_k_compress = h_k_cur[:,:,:-obs_window_size].gather(dim=2, index=indices)

@@ -140,20 +140,11 @@ def compress(eval_params, pipeline_params, max_seq_len, total_max_new_tokens, mo
     elif pipeline_params['method'] in ['rocket', 'rocket_mt', 'rocket_r0.5', 'rocket_r0.3', 'rocket_r0.7']:
         pipeline_params['kernel_size'] = 63
         pipeline_params['window_size'] = 128 if is_scbench else 32
-        compression_ratio = max(1.0, float(max_seq_len)/pipeline_params['token_budget'])
-        if pipeline_params['method'] == 'rocket_r0.5':
-            r = 0.5
-        elif pipeline_params['method'] == 'rocket_r0.7':
-            r = 0.7
-        elif pipeline_params['method'] == 'rocket_r0.3':
-            r = 0.3
-        else:
-            r = min(0.2+math.log2(compression_ratio)*0.06, 0.8)
-        token_capacity_budget = int(float(max_seq_len)/(compression_ratio**r))
-        token_capacity_budget = max(token_capacity_budget , min(2*total_max_new_tokens, max_seq_len))
-        pipeline_params['prompt_budget'] = token_capacity_budget - total_max_new_tokens
-        pipeline_params['topk'] = int(pipeline_params['token_budget']//2)
-        pipeline_params['compression_ratio'] = max(1.0, float(token_capacity_budget)/pipeline_params['token_budget'])
+        # 所有压缩参数（compression_ratio, r, prompt_budget, topk）推迟到
+        # rocket_forward 中按 layer_idx 独立计算，此处仅传递原始输入
+        pipeline_params['max_seq_len_for_budget'] = max_seq_len
+        pipeline_params['total_max_new_tokens'] = total_max_new_tokens
+        pipeline_params['num_hidden_layers'] = model.config.num_hidden_layers
     compressed_model = patch_hf(model, pipeline_params['method'], **pipeline_params)
     return compressed_model
 

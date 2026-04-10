@@ -137,6 +137,7 @@ def parse_args():
     parser.add_argument('--job_post_via', default='slurm_sbatch', type=str, help='slurm_sbatch or terminal')    
     parser.add_argument("--method", type=str, help='evaluation method')
     parser.add_argument("--token_budget", type=int, default=4096, help='token_budget')
+    parser.add_argument("--pyramid_slope", type=int, default=0, help='per-layer KV budget slope; 0 = uniform (default)')
     parser.add_argument("--dataset", type=str,  help='task for ruler benchmark')
     parser.add_argument("--max_seq_length", type=int, default=4000,  help='max seq length for ruler benchmark')
     parser.add_argument("--scdq_mode", action="store_true")
@@ -219,6 +220,7 @@ def register_args_and_configs(args):
         logger.info(f'Input pipeline config file {args.pipeline_config_dir} loaded.')
         pipeline_config['pipeline_params']['method'] = args.method
         pipeline_config['pipeline_params']['token_budget'] = args.token_budget
+        pipeline_config['pipeline_params']['pyramid_slope'] = args.pyramid_slope
         pipeline_config['pipeline_params']['scdq_mode'] = args.scdq_mode
     input_pipeline_config_path = args.output_folder_dir + input_config_subdir + 'input_pipeline_config.json'
     with open(input_pipeline_config_path, "w+") as input_pipeline_config_f:

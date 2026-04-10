@@ -123,7 +123,8 @@ def huggingface_forward(forward):
             self, hidden_states, hidden_states,
             position_ids, use_cache, past_key_value,
             self.q_proj, self.k_proj, self.v_proj, self.o_proj, 
-            self.head_dim, self.num_heads, self.num_key_value_heads
+            self.head_dim, self.num_heads, self.num_key_value_heads,
+            self.layer_idx
         )
         if use_cache:
             o, pkv = ret
