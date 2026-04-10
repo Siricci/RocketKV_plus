@@ -119,7 +119,8 @@ os.chdir(base_dir)
 
 from config.access_tokens import hf_access_token
 from huggingface_hub import login
-login(token=hf_access_token)
+if hf_access_token:
+    login(token=hf_access_token)
 
 from eval.longbench_utils.constants import LONGBENCH_E_DATASET, LONGBENCH_DATASET
 import pipeline.main_utils as main_utils
